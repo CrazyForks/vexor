@@ -309,6 +309,7 @@ def build_index(
                 stat_cache=stat_cache,
                 no_cache=no_cache,
                 embedding_dimensions=embedding_dimensions,
+                cached_index_dimension=existing_meta.get("dimension") if existing_meta else None,
             )
 
             line_backfill_targets = missing_line_files - changed_rel_paths - removed_rel_paths
@@ -657,6 +658,7 @@ def _apply_incremental_update(
     stat_cache: MutableMapping[Path, os.stat_result] | None = None,
     no_cache: bool = False,
     embedding_dimensions: int | None = None,
+    cached_index_dimension: int | None = None,
 ) -> Path:
     payloads_to_embed, payloads_to_touch = _split_payloads_by_label(
         changed_payloads,
@@ -680,6 +682,18 @@ def _apply_incremental_update(
             no_cache=no_cache,
             embedding_dimension=embedding_dimensions,
         )
+
+        # Validate dimension compatibility with existing index
+        if cached_index_dimension is not None and embeddings.size > 0:
+            new_dimension = embeddings.shape[1] if embeddings.ndim == 2 else 0
+            if new_dimension != cached_index_dimension:
+                raise ValueError(
+                    f"Embedding dimension mismatch: existing index has {cached_index_dimension}-dim vectors, "
+                    f"but new embeddings are {new_dimension}-dim. "
+                    f"This typically happens when embedding_dimensions config was changed. "
+                    f"Clear the index and rebuild: vexor index --clear {directory}"
+                )
+
         changed_entries = _build_index_entries(
             payloads_to_embed,
             embeddings,

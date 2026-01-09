@@ -628,6 +628,18 @@ def perform_search(request: SearchRequest) -> SearchResponse:
     candidate_count = min(len(paths), candidate_limit)
 
     query_vector = np.asarray(query_vector, dtype=np.float32).ravel()
+
+    # Validate dimension compatibility between query and index
+    index_dimension = file_vectors.shape[1] if file_vectors.ndim == 2 else 0
+    query_dimension = query_vector.shape[0]
+    if index_dimension != query_dimension:
+        raise ValueError(
+            f"Embedding dimension mismatch: index has {index_dimension}-dim vectors, "
+            f"but query embedding is {query_dimension}-dim. "
+            f"This typically happens when embedding_dimensions was changed after building the index. "
+            f"Rebuild the index with: vexor index {request.directory}"
+        )
+
     similarities = np.asarray(file_vectors @ query_vector, dtype=np.float32)
     top_indices = _top_indices(similarities, candidate_count)
     chunk_meta_by_id: dict[int, dict] = {}
@@ -759,6 +771,18 @@ def search_from_vectors(
     candidate_count = min(len(paths), candidate_limit)
 
     query_vector = np.asarray(query_vector, dtype=np.float32).ravel()
+
+    # Validate dimension compatibility between query and index
+    index_dimension = file_vectors.shape[1] if file_vectors.ndim == 2 else 0
+    query_dimension = query_vector.shape[0]
+    if index_dimension != query_dimension:
+        raise ValueError(
+            f"Embedding dimension mismatch: index has {index_dimension}-dim vectors, "
+            f"but query embedding is {query_dimension}-dim. "
+            f"This typically happens when embedding_dimensions was changed after building the index. "
+            f"Rebuild the index with: vexor index {request.directory}"
+        )
+
     similarities = np.asarray(file_vectors @ query_vector, dtype=np.float32)
     top_indices = _top_indices(similarities, candidate_count)
     chunk_entries = metadata.get("chunks", [])
