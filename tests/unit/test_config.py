@@ -241,3 +241,117 @@ def test_resolve_remote_rerank_api_key_prefers_config(monkeypatch):
 def test_resolve_remote_rerank_api_key_env_fallback(monkeypatch):
     monkeypatch.setenv(config_module.REMOTE_RERANK_ENV, "env-key")
     assert config_module.resolve_remote_rerank_api_key(None) == "env-key"
+
+
+# --- Embedding Dimension Tests ---
+
+
+def test_supports_dimensions_voyage():
+    """Test that voyage models are detected as supporting dimensions."""
+    assert config_module.supports_dimensions("voyage-3")
+    assert config_module.supports_dimensions("voyage-3-large")
+    assert config_module.supports_dimensions("voyage-code-3")
+
+
+def test_supports_dimensions_openai():
+    """Test that OpenAI text-embedding-3 models support dimensions."""
+    assert config_module.supports_dimensions("text-embedding-3-small")
+    assert config_module.supports_dimensions("text-embedding-3-large")
+
+
+def test_supports_dimensions_unsupported():
+    """Test that unsupported models are correctly identified."""
+    assert not config_module.supports_dimensions("text-embedding-ada-002")
+    assert not config_module.supports_dimensions("some-other-model")
+
+
+def test_get_supported_dimensions_voyage():
+    """Test that voyage models return correct dimension options."""
+    dims = config_module.get_supported_dimensions("voyage-3")
+    assert dims == (256, 512, 1024, 2048)
+
+
+def test_get_supported_dimensions_openai():
+    """Test that OpenAI models return correct dimension options."""
+    dims = config_module.get_supported_dimensions("text-embedding-3-small")
+    assert dims == (256, 512, 1024, 1536, 3072)
+
+
+def test_get_supported_dimensions_unsupported():
+    """Test that unsupported models return None."""
+    assert config_module.get_supported_dimensions("text-embedding-ada-002") is None
+
+
+def test_set_embedding_dimensions_valid(tmp_path, monkeypatch):
+    """Test setting a valid dimension for a supported model."""
+    config_file = _prepare_config(tmp_path, monkeypatch)
+    # First set a model that supports dimensions
+    config_module.save_config(config_module.Config(model="voyage-3"))
+
+    config_module.set_embedding_dimensions(512)
+
+    cfg = config_module.load_config()
+    assert cfg.embedding_dimensions == 512
+
+
+def test_set_embedding_dimensions_clears_with_zero(tmp_path, monkeypatch):
+    """Test that setting dimension to 0 clears it."""
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(config_module.Config(model="voyage-3", embedding_dimensions=512))
+
+    config_module.set_embedding_dimensions(0)
+
+    cfg = config_module.load_config()
+    assert cfg.embedding_dimensions is None
+
+
+def test_set_embedding_dimensions_clears_with_none(tmp_path, monkeypatch):
+    """Test that setting dimension to None clears it."""
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(config_module.Config(model="voyage-3", embedding_dimensions=512))
+
+    config_module.set_embedding_dimensions(None)
+
+    cfg = config_module.load_config()
+    assert cfg.embedding_dimensions is None
+
+
+def test_set_embedding_dimensions_negative_raises(tmp_path, monkeypatch):
+    """Test that negative dimensions raise ValueError."""
+    _prepare_config(tmp_path, monkeypatch)
+    import pytest
+
+    with pytest.raises(ValueError, match="non-negative"):
+        config_module.set_embedding_dimensions(-1)
+
+
+def test_set_embedding_dimensions_unsupported_model_raises(tmp_path, monkeypatch):
+    """Test that setting dimensions for unsupported model raises ValueError."""
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(config_module.Config(model="text-embedding-ada-002"))
+    import pytest
+
+    with pytest.raises(ValueError, match="does not support"):
+        config_module.set_embedding_dimensions(512)
+
+
+def test_set_embedding_dimensions_invalid_dimension_raises(tmp_path, monkeypatch):
+    """Test that invalid dimension for model raises ValueError."""
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(config_module.Config(model="voyage-3"))
+    import pytest
+
+    with pytest.raises(ValueError, match="not supported"):
+        config_module.set_embedding_dimensions(999)  # Not a valid dimension
+
+
+def test_set_embedding_dimensions_with_explicit_model(tmp_path, monkeypatch):
+    """Test setting dimensions with explicit model override."""
+    _prepare_config(tmp_path, monkeypatch)
+    # Config has unsupported model, but we pass a supported model explicitly
+    config_module.save_config(config_module.Config(model="text-embedding-ada-002"))
+
+    config_module.set_embedding_dimensions(512, model="voyage-3")
+
+    cfg = config_module.load_config()
+    assert cfg.embedding_dimensions == 512

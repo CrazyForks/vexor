@@ -32,14 +32,17 @@ from .config import (
     DEFAULT_PROVIDER,
     DEFAULT_RERANK,
     DEFAULT_VOYAGE_MODEL,
+    DIMENSION_SUPPORTED_MODELS,
     SUPPORTED_EXTRACT_BACKENDS,
     SUPPORTED_PROVIDERS,
     SUPPORTED_RERANKERS,
     flashrank_cache_dir,
+    get_supported_dimensions,
     load_config,
     normalize_remote_rerank_url,
     resolve_remote_rerank_api_key,
     resolve_default_model,
+    supports_dimensions,
 )
 from .modes import available_modes, get_strategy
 from .services.cache_service import is_cache_current, load_index_metadata_safe
@@ -1001,6 +1004,26 @@ def config(
             auto_index = _parse_boolean(set_auto_index_option)
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
+
+    # Validate embedding dimensions if set
+    if set_embedding_dimensions_option is not None:
+        if set_embedding_dimensions_option < 0:
+            raise typer.BadParameter(
+                f"--set-embedding-dimensions must be non-negative, got {set_embedding_dimensions_option}"
+            )
+        if set_embedding_dimensions_option > 0:
+            # Validate against pending_model (accounts for model being set at same time)
+            if not supports_dimensions(pending_model):
+                raise typer.BadParameter(
+                    f"Model '{pending_model}' does not support custom dimensions. "
+                    f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+                )
+            supported = get_supported_dimensions(pending_model)
+            if supported and set_embedding_dimensions_option not in supported:
+                raise typer.BadParameter(
+                    f"Dimension {set_embedding_dimensions_option} is not supported for model '{pending_model}'. "
+                    f"Supported dimensions: {supported}"
+                )
 
     updates = apply_config_updates(
         api_key=set_api_key_option,

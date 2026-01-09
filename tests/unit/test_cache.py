@@ -186,6 +186,74 @@ def test_embedding_cache_prunes_by_ttl_and_capacity(tmp_path, monkeypatch):
     assert extra_hash in loaded
 
 
+# --- Embedding Dimension Cache Tests ---
+
+
+def test_embedding_cache_key_includes_dimension():
+    """Test that dimension is included in the cache key hash."""
+    key_no_dim = cache.embedding_cache_key("hello")
+    key_dim_512 = cache.embedding_cache_key("hello", dimension=512)
+    key_dim_1024 = cache.embedding_cache_key("hello", dimension=1024)
+
+    # All keys should be different
+    assert key_no_dim != key_dim_512
+    assert key_no_dim != key_dim_1024
+    assert key_dim_512 != key_dim_1024
+
+
+def test_embedding_cache_key_none_dimension_same_as_no_dimension():
+    """Test that explicit None dimension produces same key as no dimension."""
+    key_no_dim = cache.embedding_cache_key("hello")
+    key_none_dim = cache.embedding_cache_key("hello", dimension=None)
+
+    assert key_no_dim == key_none_dim
+
+
+def test_embedding_cache_dimension_isolation(tmp_path, monkeypatch):
+    """Test that embeddings with different dimensions don't pollute each other."""
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path / "cache")
+    cache._clear_embedding_memory_cache()
+
+    text = "test text"
+    vector_512 = np.array([1.0] * 512, dtype=np.float32)
+    vector_1024 = np.array([2.0] * 1024, dtype=np.float32)
+
+    hash_512 = cache.embedding_cache_key(text, dimension=512)
+    hash_1024 = cache.embedding_cache_key(text, dimension=1024)
+
+    # Store both vectors
+    cache.store_embedding_cache(model="model", embeddings={hash_512: vector_512}, dimension=512)
+    cache.store_embedding_cache(model="model", embeddings={hash_1024: vector_1024}, dimension=1024)
+
+    # Load with correct dimensions should work
+    loaded_512 = cache.load_embedding_cache("model", [hash_512], dimension=512)
+    loaded_1024 = cache.load_embedding_cache("model", [hash_1024], dimension=1024)
+
+    assert hash_512 in loaded_512
+    assert hash_1024 in loaded_1024
+    assert np.allclose(loaded_512[hash_512], vector_512)
+    assert np.allclose(loaded_1024[hash_1024], vector_1024)
+
+
+def test_embedding_cache_wrong_dimension_not_found(tmp_path, monkeypatch):
+    """Test that querying with wrong dimension returns empty."""
+    monkeypatch.setattr(cache, "CACHE_DIR", tmp_path / "cache")
+    cache._clear_embedding_memory_cache()
+
+    text = "test text"
+    vector_512 = np.array([1.0] * 512, dtype=np.float32)
+    hash_512 = cache.embedding_cache_key(text, dimension=512)
+
+    cache.store_embedding_cache(model="model", embeddings={hash_512: vector_512}, dimension=512)
+
+    # Query with different dimension should not find it
+    # (because the hash is different and the key includes dimension)
+    hash_1024 = cache.embedding_cache_key(text, dimension=1024)
+    loaded = cache.load_embedding_cache("model", [hash_1024], dimension=1024)
+
+    assert hash_1024 not in loaded
+
+
 def test_cache_file_missing(tmp_path, monkeypatch):
     monkeypatch.setattr(cache, "CACHE_DIR", tmp_path)
     root = tmp_path / "missing"

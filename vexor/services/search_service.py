@@ -869,7 +869,7 @@ def _load_index_vectors_for_request(
             request.extensions,
             respect_gitignore=request.respect_gitignore,
         )
-        # Check dimension compatibility when both are explicitly set
+        # Check dimension compatibility when user explicitly requests a specific dimension
         cached_dimension = metadata.get("dimension")
         requested_dimension = request.embedding_dimensions
         if (
@@ -951,7 +951,7 @@ def _select_cache_superset(
             continue
         if entry.get("mode") != request.mode:
             continue
-        # Check embedding dimension compatibility when both are explicitly set
+        # Check embedding dimension compatibility when user explicitly requests a specific dimension
         cached_dimension = entry.get("dimension")
         requested_dimension = request.embedding_dimensions
         if (

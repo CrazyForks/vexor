@@ -306,10 +306,45 @@ def set_flashrank_model(value: str | None) -> None:
     save_config(config)
 
 
-def set_embedding_dimensions(value: int | None) -> None:
-    """Set the embedding dimensions for providers that support it (e.g., Voyage AI)."""
+def set_embedding_dimensions(value: int | None, model: str | None = None) -> None:
+    """Set the embedding dimensions for providers that support it (e.g., Voyage AI).
+
+    Args:
+        value: The dimension to set, or None/0 to clear
+        model: Optional model to validate against. If not provided, uses config model.
+
+    Raises:
+        ValueError: If value is negative, model doesn't support dimensions,
+                   or dimension is not valid for the model.
+    """
     config = load_config()
-    config.embedding_dimensions = value if value and value > 0 else None
+
+    # Reject negative values explicitly
+    if value is not None and value < 0:
+        raise ValueError(f"embedding_dimensions must be non-negative, got {value}")
+
+    # Treat 0 and None as "clear"
+    if not value or value <= 0:
+        config.embedding_dimensions = None
+        save_config(config)
+        return
+
+    # Validate against model if dimensions are being set
+    effective_model = model if model else config.model
+    if not supports_dimensions(effective_model):
+        raise ValueError(
+            f"Model '{effective_model}' does not support custom dimensions. "
+            f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+        )
+
+    supported = get_supported_dimensions(effective_model)
+    if supported and value not in supported:
+        raise ValueError(
+            f"Dimension {value} is not supported for model '{effective_model}'. "
+            f"Supported dimensions: {supported}"
+        )
+
+    config.embedding_dimensions = value
     save_config(config)
 
 
