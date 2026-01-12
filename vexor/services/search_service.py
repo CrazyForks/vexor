@@ -590,8 +590,10 @@ def perform_search(request: SearchRequest) -> SearchResponse:
             query_vector = None
 
     if query_vector is None and not request.no_cache:
-        query_text_hash = embedding_cache_key(request.query)
-        cached = load_embedding_cache(request.model_name, [query_text_hash])
+        query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
+        cached = load_embedding_cache(
+            request.model_name, [query_text_hash], dimension=request.embedding_dimensions
+        )
         query_vector = cached.get(query_text_hash)
         if query_vector is not None and query_vector.size != file_vectors.shape[1]:
             query_vector = None
@@ -600,11 +602,12 @@ def perform_search(request: SearchRequest) -> SearchResponse:
         query_vector = searcher.embed_texts([request.query])[0]
         if not request.no_cache:
             if query_text_hash is None:
-                query_text_hash = embedding_cache_key(request.query)
+                query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
             try:
                 store_embedding_cache(
                     model=request.model_name,
                     embeddings={query_text_hash: query_vector},
+                    dimension=request.embedding_dimensions,
                 )
             except Exception:  # pragma: no cover - best-effort cache storage
                 pass
@@ -741,8 +744,10 @@ def search_from_vectors(
     if not request.no_cache:
         from ..cache import embedding_cache_key, load_embedding_cache, store_embedding_cache
 
-        query_text_hash = embedding_cache_key(request.query)
-        cached = load_embedding_cache(request.model_name, [query_text_hash])
+        query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
+        cached = load_embedding_cache(
+            request.model_name, [query_text_hash], dimension=request.embedding_dimensions
+        )
         query_vector = cached.get(query_text_hash)
         if query_vector is not None and query_vector.size != file_vectors.shape[1]:
             query_vector = None
@@ -753,11 +758,12 @@ def search_from_vectors(
             if query_text_hash is None:
                 from ..cache import embedding_cache_key, store_embedding_cache
 
-                query_text_hash = embedding_cache_key(request.query)
+                query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
             try:
                 store_embedding_cache(
                     model=request.model_name,
                     embeddings={query_text_hash: query_vector},
+                    dimension=request.embedding_dimensions,
                 )
             except Exception:  # pragma: no cover - best-effort cache storage
                 pass

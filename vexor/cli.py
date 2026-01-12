@@ -493,7 +493,7 @@ def search(
         else:
             typer.echo(message, err=True)
         raise typer.Exit(code=1)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         if output_format == SearchOutputFormat.rich:
             console.print(_styled(str(exc), Styles.ERROR))
         else:
@@ -695,7 +695,7 @@ def index(
             extensions=normalized_exts,
             embedding_dimensions=config.embedding_dimensions,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         console.print(_styled(str(exc), Styles.ERROR))
         raise typer.Exit(code=1)
     if result.status == IndexStatus.EMPTY:
@@ -1012,16 +1012,17 @@ def config(
                 f"--set-embedding-dimensions must be non-negative, got {set_embedding_dimensions_option}"
             )
         if set_embedding_dimensions_option > 0:
-            # Validate against pending_model (accounts for model being set at same time)
-            if not supports_dimensions(pending_model):
+            # Resolve effective model from provider + model to account for provider defaults
+            effective_model = resolve_default_model(pending_provider, pending_model)
+            if not supports_dimensions(effective_model):
                 raise typer.BadParameter(
-                    f"Model '{pending_model}' does not support custom dimensions. "
+                    f"Model '{effective_model}' does not support custom dimensions. "
                     f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
                 )
-            supported = get_supported_dimensions(pending_model)
+            supported = get_supported_dimensions(effective_model)
             if supported and set_embedding_dimensions_option not in supported:
                 raise typer.BadParameter(
-                    f"Dimension {set_embedding_dimensions_option} is not supported for model '{pending_model}'. "
+                    f"Dimension {set_embedding_dimensions_option} is not supported for model '{effective_model}'. "
                     f"Supported dimensions: {supported}"
                 )
 

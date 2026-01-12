@@ -306,12 +306,17 @@ def set_flashrank_model(value: str | None) -> None:
     save_config(config)
 
 
-def set_embedding_dimensions(value: int | None, model: str | None = None) -> None:
+def set_embedding_dimensions(
+    value: int | None,
+    model: str | None = None,
+    provider: str | None = None,
+) -> None:
     """Set the embedding dimensions for providers that support it (e.g., Voyage AI).
 
     Args:
         value: The dimension to set, or None/0 to clear
         model: Optional model to validate against. If not provided, uses config model.
+        provider: Optional provider to resolve effective model. If not provided, uses config provider.
 
     Raises:
         ValueError: If value is negative, model doesn't support dimensions,
@@ -329,8 +334,9 @@ def set_embedding_dimensions(value: int | None, model: str | None = None) -> Non
         save_config(config)
         return
 
-    # Validate against model if dimensions are being set
-    effective_model = model if model else config.model
+    # Validate against effective model (resolved from provider + model)
+    effective_provider = provider if provider else config.provider
+    effective_model = resolve_default_model(effective_provider, model if model else config.model)
     if not supports_dimensions(effective_model):
         raise ValueError(
             f"Model '{effective_model}' does not support custom dimensions. "
