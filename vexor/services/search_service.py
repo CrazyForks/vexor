@@ -56,6 +56,7 @@ class SearchRequest:
     rerank: str = DEFAULT_RERANK
     flashrank_model: str | None = None
     remote_rerank: RemoteRerankConfig | None = None
+    embedding_dimensions: int | None = None
 
 
 @dataclass(slots=True)
@@ -409,6 +410,7 @@ def perform_search(request: SearchRequest) -> SearchResponse:
             exclude_patterns=request.exclude_patterns,
             extensions=request.extensions,
             no_cache=request.no_cache,
+            embedding_dimensions=request.embedding_dimensions,
         )
         if result.status == IndexStatus.EMPTY:
             return SearchResponse(
@@ -493,6 +495,7 @@ def perform_search(request: SearchRequest) -> SearchResponse:
             exclude_patterns=index_excludes,
             extensions=index_extensions,
             no_cache=request.no_cache,
+            embedding_dimensions=request.embedding_dimensions,
         )
         if result.status == IndexStatus.EMPTY:
             return SearchResponse(
@@ -570,6 +573,7 @@ def perform_search(request: SearchRequest) -> SearchResponse:
         base_url=request.base_url,
         api_key=request.api_key,
         local_cuda=request.local_cuda,
+        embedding_dimensions=request.embedding_dimensions,
     )
     query_vector = None
     query_hash = None
@@ -586,8 +590,10 @@ def perform_search(request: SearchRequest) -> SearchResponse:
             query_vector = None
 
     if query_vector is None and not request.no_cache:
-        query_text_hash = embedding_cache_key(request.query)
-        cached = load_embedding_cache(request.model_name, [query_text_hash])
+        query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
+        cached = load_embedding_cache(
+            request.model_name, [query_text_hash], dimension=request.embedding_dimensions
+        )
         query_vector = cached.get(query_text_hash)
         if query_vector is not None and query_vector.size != file_vectors.shape[1]:
             query_vector = None
@@ -596,11 +602,12 @@ def perform_search(request: SearchRequest) -> SearchResponse:
         query_vector = searcher.embed_texts([request.query])[0]
         if not request.no_cache:
             if query_text_hash is None:
-                query_text_hash = embedding_cache_key(request.query)
+                query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
             try:
                 store_embedding_cache(
                     model=request.model_name,
                     embeddings={query_text_hash: query_vector},
+                    dimension=request.embedding_dimensions,
                 )
             except Exception:  # pragma: no cover - best-effort cache storage
                 pass
@@ -624,6 +631,18 @@ def perform_search(request: SearchRequest) -> SearchResponse:
     candidate_count = min(len(paths), candidate_limit)
 
     query_vector = np.asarray(query_vector, dtype=np.float32).ravel()
+
+    # Validate dimension compatibility between query and index
+    index_dimension = file_vectors.shape[1] if file_vectors.ndim == 2 else 0
+    query_dimension = query_vector.shape[0]
+    if index_dimension != query_dimension:
+        raise ValueError(
+            f"Embedding dimension mismatch: index has {index_dimension}-dim vectors, "
+            f"but query embedding is {query_dimension}-dim. "
+            f"This typically happens when embedding_dimensions was changed after building the index. "
+            f"Rebuild the index with: vexor index {request.directory}"
+        )
+
     similarities = np.asarray(file_vectors @ query_vector, dtype=np.float32)
     top_indices = _top_indices(similarities, candidate_count)
     chunk_meta_by_id: dict[int, dict] = {}
@@ -718,14 +737,17 @@ def search_from_vectors(
         base_url=request.base_url,
         api_key=request.api_key,
         local_cuda=request.local_cuda,
+        embedding_dimensions=request.embedding_dimensions,
     )
     query_vector = None
     query_text_hash = None
     if not request.no_cache:
         from ..cache import embedding_cache_key, load_embedding_cache, store_embedding_cache
 
-        query_text_hash = embedding_cache_key(request.query)
-        cached = load_embedding_cache(request.model_name, [query_text_hash])
+        query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
+        cached = load_embedding_cache(
+            request.model_name, [query_text_hash], dimension=request.embedding_dimensions
+        )
         query_vector = cached.get(query_text_hash)
         if query_vector is not None and query_vector.size != file_vectors.shape[1]:
             query_vector = None
@@ -736,11 +758,12 @@ def search_from_vectors(
             if query_text_hash is None:
                 from ..cache import embedding_cache_key, store_embedding_cache
 
-                query_text_hash = embedding_cache_key(request.query)
+                query_text_hash = embedding_cache_key(request.query, dimension=request.embedding_dimensions)
             try:
                 store_embedding_cache(
                     model=request.model_name,
                     embeddings={query_text_hash: query_vector},
+                    dimension=request.embedding_dimensions,
                 )
             except Exception:  # pragma: no cover - best-effort cache storage
                 pass
@@ -754,6 +777,18 @@ def search_from_vectors(
     candidate_count = min(len(paths), candidate_limit)
 
     query_vector = np.asarray(query_vector, dtype=np.float32).ravel()
+
+    # Validate dimension compatibility between query and index
+    index_dimension = file_vectors.shape[1] if file_vectors.ndim == 2 else 0
+    query_dimension = query_vector.shape[0]
+    if index_dimension != query_dimension:
+        raise ValueError(
+            f"Embedding dimension mismatch: index has {index_dimension}-dim vectors, "
+            f"but query embedding is {query_dimension}-dim. "
+            f"This typically happens when embedding_dimensions was changed after building the index. "
+            f"Rebuild the index with: vexor index {request.directory}"
+        )
+
     similarities = np.asarray(file_vectors @ query_vector, dtype=np.float32)
     top_indices = _top_indices(similarities, candidate_count)
     chunk_entries = metadata.get("chunks", [])
@@ -827,6 +862,7 @@ def _perform_search_with_temporary_index(request: SearchRequest) -> SearchRespon
         exclude_patterns=request.exclude_patterns,
         extensions=request.extensions,
         no_cache=request.no_cache,
+        embedding_dimensions=request.embedding_dimensions,
     )
     return search_from_vectors(
         request,
@@ -863,6 +899,18 @@ def _load_index_vectors_for_request(
             request.extensions,
             respect_gitignore=request.respect_gitignore,
         )
+        # Check dimension compatibility when user explicitly requests a specific dimension
+        cached_dimension = metadata.get("dimension")
+        requested_dimension = request.embedding_dimensions
+        if (
+            cached_dimension is not None
+            and requested_dimension is not None
+            and cached_dimension != requested_dimension
+        ):
+            raise FileNotFoundError(
+                f"Cached index has dimension {cached_dimension}, "
+                f"but requested {requested_dimension}"
+            )
         return (
             paths,
             file_vectors,
@@ -932,6 +980,15 @@ def _select_cache_superset(
         if request.recursive and not entry_recursive:
             continue
         if entry.get("mode") != request.mode:
+            continue
+        # Check embedding dimension compatibility when user explicitly requests a specific dimension
+        cached_dimension = entry.get("dimension")
+        requested_dimension = request.embedding_dimensions
+        if (
+            cached_dimension is not None
+            and requested_dimension is not None
+            and cached_dimension != requested_dimension
+        ):
             continue
         cached_excludes = tuple(entry.get("exclude_patterns") or ())
         cached_exclude_set = set(normalize_exclude_patterns(cached_excludes))

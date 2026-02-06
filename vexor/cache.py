@@ -30,7 +30,7 @@ EMBED_CACHE_TTL_DAYS = 30
 EMBED_CACHE_MAX_ENTRIES = 50_000
 EMBED_MEMORY_CACHE_MAX_ENTRIES = 2_048
 
-_EMBED_MEMORY_CACHE: "OrderedDict[tuple[str, str], np.ndarray]" = OrderedDict()
+_EMBED_MEMORY_CACHE: "OrderedDict[tuple[str, int | None, str], np.ndarray]" = OrderedDict()
 _EMBED_MEMORY_LOCK = Lock()
 
 
@@ -89,11 +89,20 @@ def query_cache_key(query: str, model: str) -> str:
     return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
 
-def embedding_cache_key(text: str) -> str:
-    """Return a stable hash for embedding cache lookups."""
+def embedding_cache_key(text: str, dimension: int | None = None) -> str:
+    """Return a stable hash for embedding cache lookups.
 
+    Args:
+        text: The text to hash
+        dimension: Optional embedding dimension (included in hash for dimension-aware caching)
+    """
     clean_text = text or ""
-    return hashlib.sha1(clean_text.encode("utf-8")).hexdigest()
+    # Include dimension in hash to prevent cross-dimension cache pollution
+    if dimension is not None:
+        base = f"{clean_text}|dim={dimension}"
+    else:
+        base = clean_text
+    return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
 
 def _clear_embedding_memory_cache() -> None:
@@ -106,6 +115,7 @@ def _clear_embedding_memory_cache() -> None:
 def _load_embedding_memory_cache(
     model: str,
     text_hashes: Sequence[str],
+    dimension: int | None = None,
 ) -> dict[str, np.ndarray]:
     if EMBED_MEMORY_CACHE_MAX_ENTRIES <= 0:
         return {}
@@ -114,7 +124,8 @@ def _load_embedding_memory_cache(
         for text_hash in text_hashes:
             if not text_hash:
                 continue
-            key = (model, text_hash)
+            # Include dimension in cache key to prevent cross-dimension pollution
+            key = (model, dimension, text_hash)
             vector = _EMBED_MEMORY_CACHE.pop(key, None)
             if vector is None:
                 continue
@@ -127,6 +138,7 @@ def _store_embedding_memory_cache(
     *,
     model: str,
     embeddings: Mapping[str, np.ndarray],
+    dimension: int | None = None,
 ) -> None:
     if EMBED_MEMORY_CACHE_MAX_ENTRIES <= 0 or not embeddings:
         return
@@ -137,7 +149,8 @@ def _store_embedding_memory_cache(
             array = np.asarray(vector, dtype=np.float32)
             if array.size == 0:
                 continue
-            key = (model, text_hash)
+            # Include dimension in cache key to prevent cross-dimension pollution
+            key = (model, dimension, text_hash)
             if key in _EMBED_MEMORY_CACHE:
                 _EMBED_MEMORY_CACHE.pop(key, None)
             _EMBED_MEMORY_CACHE[key] = array
@@ -1388,13 +1401,22 @@ def load_embedding_cache(
     model: str,
     text_hashes: Sequence[str],
     conn: sqlite3.Connection | None = None,
+    *,
+    dimension: int | None = None,
 ) -> dict[str, np.ndarray]:
-    """Load cached embeddings keyed by (model, text_hash)."""
+    """Load cached embeddings keyed by (model, text_hash).
 
+    Args:
+        model: The embedding model name
+        text_hashes: Sequence of text hashes to look up (should be generated with
+            embedding_cache_key() using the same dimension parameter)
+        conn: Optional database connection
+        dimension: Embedding dimension (used for memory cache segmentation)
+    """
     unique_hashes = list(dict.fromkeys([value for value in text_hashes if value]))
     if not unique_hashes:
         return {}
-    results = _load_embedding_memory_cache(model, unique_hashes)
+    results = _load_embedding_memory_cache(model, unique_hashes, dimension=dimension)
     missing = [value for value in unique_hashes if value not in results]
     if not missing:
         return results
@@ -1429,7 +1451,9 @@ def load_embedding_cache(
                     continue
                 disk_results[row["text_hash"]] = vector
         if disk_results:
-            _store_embedding_memory_cache(model=model, embeddings=disk_results)
+            _store_embedding_memory_cache(
+                model=model, embeddings=disk_results, dimension=dimension
+            )
             results.update(disk_results)
         return results
     finally:
@@ -1442,12 +1466,20 @@ def store_embedding_cache(
     model: str,
     embeddings: Mapping[str, np.ndarray],
     conn: sqlite3.Connection | None = None,
+    dimension: int | None = None,
 ) -> None:
-    """Store embedding vectors keyed by (model, text_hash)."""
+    """Store embedding vectors keyed by (model, text_hash).
 
+    Args:
+        model: The embedding model name
+        embeddings: Dict mapping text_hash -> vector (hashes should be generated with
+            embedding_cache_key() using the same dimension parameter)
+        conn: Optional database connection
+        dimension: Embedding dimension (used for memory cache segmentation)
+    """
     if not embeddings:
         return
-    _store_embedding_memory_cache(model=model, embeddings=embeddings)
+    _store_embedding_memory_cache(model=model, embeddings=embeddings, dimension=dimension)
     db_path = cache_db_path()
     owns_connection = conn is None
     connection = conn or _connect(db_path)

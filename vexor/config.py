@@ -23,6 +23,7 @@ _CONFIG_DIR_OVERRIDE: ContextVar[Path | None] = ContextVar(
 )
 DEFAULT_MODEL = "text-embedding-3-small"
 DEFAULT_GEMINI_MODEL = "gemini-embedding-001"
+DEFAULT_VOYAGE_MODEL = "voyage-3-large"
 DEFAULT_LOCAL_MODEL = "intfloat/multilingual-e5-small"
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_EMBED_CONCURRENCY = 4
@@ -32,13 +33,21 @@ DEFAULT_PROVIDER = "openai"
 DEFAULT_RERANK = "off"
 DEFAULT_FLASHRANK_MODEL = "ms-marco-TinyBERT-L-2-v2"
 DEFAULT_FLASHRANK_MAX_LENGTH = 256
-SUPPORTED_PROVIDERS: tuple[str, ...] = (DEFAULT_PROVIDER, "gemini", "custom", "local")
+VOYAGE_BASE_URL = "https://api.voyageai.com/v1"
+SUPPORTED_PROVIDERS: tuple[str, ...] = (DEFAULT_PROVIDER, "gemini", "voyageai", "custom", "local")
 SUPPORTED_RERANKERS: tuple[str, ...] = ("off", "bm25", "flashrank", "remote")
 SUPPORTED_EXTRACT_BACKENDS: tuple[str, ...] = ("auto", "thread", "process")
+# Models that support the dimensions parameter (model prefix -> supported dimensions)
+DIMENSION_SUPPORTED_MODELS: dict[str, tuple[int, ...]] = {
+    "voyage-3": (256, 512, 1024, 2048),
+    "voyage-code-3": (256, 512, 1024, 2048),
+    "text-embedding-3": (256, 512, 1024, 1536, 3072),
+}
 ENV_API_KEY = "VEXOR_API_KEY"
 REMOTE_RERANK_ENV = "VEXOR_REMOTE_RERANK_API_KEY"
 LEGACY_GEMINI_ENV = "GOOGLE_GENAI_API_KEY"
 OPENAI_ENV = "OPENAI_API_KEY"
+VOYAGE_ENV = "VOYAGE_API_KEY"
 
 
 @dataclass
@@ -63,6 +72,7 @@ class Config:
     rerank: str = DEFAULT_RERANK
     flashrank_model: str | None = None
     remote_rerank: RemoteRerankConfig | None = None
+    embedding_dimensions: int | None = None
 
 
 def _parse_remote_rerank(raw: object) -> RemoteRerankConfig | None:
@@ -133,6 +143,7 @@ def load_config() -> Config:
         rerank=rerank,
         flashrank_model=raw.get("flashrank_model") or None,
         remote_rerank=_parse_remote_rerank(raw.get("remote_rerank")),
+        embedding_dimensions=_coerce_optional_int(raw.get("embedding_dimensions")),
     )
 
 
@@ -157,6 +168,8 @@ def save_config(config: Config) -> None:
     data["rerank"] = config.rerank
     if config.flashrank_model:
         data["flashrank_model"] = config.flashrank_model
+    if config.embedding_dimensions is not None:
+        data["embedding_dimensions"] = config.embedding_dimensions
     if config.remote_rerank is not None:
         remote_data: Dict[str, Any] = {}
         if config.remote_rerank.base_url:
@@ -293,6 +306,54 @@ def set_flashrank_model(value: str | None) -> None:
     save_config(config)
 
 
+def set_embedding_dimensions(
+    value: int | None,
+    model: str | None = None,
+    provider: str | None = None,
+) -> None:
+    """Set the embedding dimensions for providers that support it (e.g., Voyage AI).
+
+    Args:
+        value: The dimension to set, or None/0 to clear
+        model: Optional model to validate against. If not provided, uses config model.
+        provider: Optional provider to resolve effective model. If not provided, uses config provider.
+
+    Raises:
+        ValueError: If value is negative, model doesn't support dimensions,
+                   or dimension is not valid for the model.
+    """
+    config = load_config()
+
+    # Reject negative values explicitly
+    if value is not None and value < 0:
+        raise ValueError(f"embedding_dimensions must be non-negative, got {value}")
+
+    # Treat 0 and None as "clear"
+    if not value or value <= 0:
+        config.embedding_dimensions = None
+        save_config(config)
+        return
+
+    # Validate against effective model (resolved from provider + model)
+    effective_provider = provider if provider else config.provider
+    effective_model = resolve_default_model(effective_provider, model if model else config.model)
+    if not supports_dimensions(effective_model):
+        raise ValueError(
+            f"Model '{effective_model}' does not support custom dimensions. "
+            f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+        )
+
+    supported = get_supported_dimensions(effective_model)
+    if supported and value not in supported:
+        raise ValueError(
+            f"Dimension {value} is not supported for model '{effective_model}'. "
+            f"Supported dimensions: {supported}"
+        )
+
+    config.embedding_dimensions = value
+    save_config(config)
+
+
 def update_remote_rerank(
     *,
     base_url: str | None = None,
@@ -345,9 +406,36 @@ def resolve_default_model(provider: str | None, model: str | None) -> str:
     normalized = (provider or DEFAULT_PROVIDER).lower()
     if normalized == "gemini" and (not clean_model or clean_model == DEFAULT_MODEL):
         return DEFAULT_GEMINI_MODEL
+    if normalized == "voyageai" and (not clean_model or clean_model == DEFAULT_MODEL):
+        return DEFAULT_VOYAGE_MODEL
     if clean_model:
         return clean_model
     return DEFAULT_MODEL
+
+
+def resolve_base_url(provider: str | None, configured_url: str | None) -> str | None:
+    """Return the effective base URL for the selected provider."""
+    if configured_url:
+        return configured_url
+    normalized = (provider or DEFAULT_PROVIDER).lower()
+    if normalized == "voyageai":
+        return VOYAGE_BASE_URL
+    return None
+
+
+def supports_dimensions(model: str) -> bool:
+    """Check if a model supports the dimensions parameter."""
+    model_lower = model.lower()
+    return any(model_lower.startswith(prefix) for prefix in DIMENSION_SUPPORTED_MODELS)
+
+
+def get_supported_dimensions(model: str) -> tuple[int, ...] | None:
+    """Return the supported dimensions for a model, or None if not supported."""
+    model_lower = model.lower()
+    for prefix, dims in DIMENSION_SUPPORTED_MODELS.items():
+        if model_lower.startswith(prefix):
+            return dims
+    return None
 
 
 def resolve_api_key(configured: str | None, provider: str) -> str | None:
@@ -365,6 +453,10 @@ def resolve_api_key(configured: str | None, provider: str) -> str | None:
         legacy = os.getenv(LEGACY_GEMINI_ENV)
         if legacy:
             return legacy
+    if normalized == "voyageai":
+        voyage_key = os.getenv(VOYAGE_ENV)
+        if voyage_key:
+            return voyage_key
     if normalized in {"openai", "custom"}:
         openai_key = os.getenv(OPENAI_ENV)
         if openai_key:
@@ -422,6 +514,7 @@ def _clone_config(config: Config) -> Config:
                 model=remote.model,
             )
         ),
+        embedding_dimensions=config.embedding_dimensions,
     )
 
 
@@ -466,6 +559,8 @@ def _apply_config_payload(config: Config, payload: Mapping[str, object]) -> None
         )
     if "remote_rerank" in payload:
         config.remote_rerank = _coerce_remote_rerank(payload["remote_rerank"])
+    if "embedding_dimensions" in payload:
+        config.embedding_dimensions = _coerce_optional_int(payload["embedding_dimensions"])
 
 
 def _coerce_optional_str(value: object, field: str) -> str | None:
@@ -520,6 +615,30 @@ def _coerce_bool(value: object, field: str) -> bool:
         if cleaned in {"false", "0", "no", "off"}:
             return False
     raise ValueError(Messages.ERROR_CONFIG_VALUE_INVALID.format(field=field))
+
+
+def _coerce_optional_int(value: object) -> int | None:
+    """Coerce a value to an optional integer, returning None for empty/null values."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if value > 0 else None
+    if isinstance(value, float):
+        if value.is_integer() and value > 0:
+            return int(value)
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        try:
+            parsed = int(cleaned)
+            return parsed if parsed > 0 else None
+        except ValueError:
+            return None
+    return None
 
 
 def _normalize_extract_backend(value: object) -> str:

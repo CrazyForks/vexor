@@ -142,6 +142,7 @@ def build_index(
     exclude_patterns: Sequence[str] | None = None,
     extensions: Sequence[str] | None = None,
     no_cache: bool = False,
+    embedding_dimensions: int | None = None,
 ) -> IndexResult:
     """Create or refresh the cached index for *directory*."""
 
@@ -183,8 +184,24 @@ def build_index(
         base_url=base_url,
         api_key=api_key,
         local_cuda=local_cuda,
+        embedding_dimensions=embedding_dimensions,
     )
 
+    # Check if dimensions changed - if so, force full rebuild with no embedding cache
+    # Only detect mismatch when user explicitly requests a specific dimension that differs
+    force_no_cache = False
+    if cached_files:
+        cached_dimension = existing_meta.get("dimension") if existing_meta else None
+        dimension_changed = (
+            cached_dimension is not None
+            and embedding_dimensions is not None
+            and cached_dimension != embedding_dimensions
+        )
+        if dimension_changed:
+            # Dimensions changed, need full rebuild without embedding cache
+            # (cached embeddings have wrong dimensions)
+            cached_files = []
+            force_no_cache = True
     if cached_files:
         cached_version = int(existing_meta.get("version", 0) or 0) if existing_meta else 0
         full_max_bytes = (
@@ -291,6 +308,8 @@ def build_index(
                 extensions=extensions,
                 stat_cache=stat_cache,
                 no_cache=no_cache,
+                embedding_dimensions=embedding_dimensions,
+                cached_index_dimension=existing_meta.get("dimension") if existing_meta else None,
             )
 
             line_backfill_targets = missing_line_files - changed_rel_paths - removed_rel_paths
@@ -333,7 +352,8 @@ def build_index(
         searcher=searcher,
         model_name=model_name,
         labels=file_labels,
-        no_cache=no_cache,
+        no_cache=no_cache or force_no_cache,
+        embedding_dimension=embedding_dimensions,
     )
     entries = _build_index_entries(payloads, embeddings, directory, stat_cache=stat_cache)
 
@@ -374,6 +394,7 @@ def build_index_in_memory(
     exclude_patterns: Sequence[str] | None = None,
     extensions: Sequence[str] | None = None,
     no_cache: bool = False,
+    embedding_dimensions: int | None = None,
 ) -> tuple[list[Path], np.ndarray, dict]:
     """Build an index in memory without writing to disk."""
 
@@ -418,6 +439,7 @@ def build_index_in_memory(
         base_url=base_url,
         api_key=api_key,
         local_cuda=local_cuda,
+        embedding_dimensions=embedding_dimensions,
     )
     payloads = _payloads_for_files(
         strategy,
@@ -455,6 +477,7 @@ def build_index_in_memory(
             searcher=searcher,
             model_name=model_name,
             labels=labels,
+            embedding_dimension=embedding_dimensions,
         )
     entries = _build_index_entries(
         payloads,
@@ -634,6 +657,8 @@ def _apply_incremental_update(
     extensions: Sequence[str] | None,
     stat_cache: MutableMapping[Path, os.stat_result] | None = None,
     no_cache: bool = False,
+    embedding_dimensions: int | None = None,
+    cached_index_dimension: int | None = None,
 ) -> Path:
     payloads_to_embed, payloads_to_touch = _split_payloads_by_label(
         changed_payloads,
@@ -655,7 +680,20 @@ def _apply_incremental_update(
             model_name=model_name,
             labels=labels,
             no_cache=no_cache,
+            embedding_dimension=embedding_dimensions,
         )
+
+        # Validate dimension compatibility with existing index
+        if cached_index_dimension is not None and embeddings.size > 0:
+            new_dimension = embeddings.shape[1] if embeddings.ndim == 2 else 0
+            if new_dimension != cached_index_dimension:
+                raise ValueError(
+                    f"Embedding dimension mismatch: existing index has {cached_index_dimension}-dim vectors, "
+                    f"but new embeddings are {new_dimension}-dim. "
+                    f"This typically happens when embedding_dimensions config was changed. "
+                    f"Clear the index and rebuild: vexor index --clear {directory}"
+                )
+
         changed_entries = _build_index_entries(
             payloads_to_embed,
             embeddings,
@@ -693,7 +731,18 @@ def _embed_labels_with_cache(
     model_name: str,
     labels: Sequence[str],
     no_cache: bool = False,
+    embedding_dimension: int | None = None,
 ) -> np.ndarray:
+    """Embed labels with caching support.
+
+    Args:
+        searcher: The embedding searcher instance
+        model_name: Name of the embedding model
+        labels: Sequence of label strings to embed
+        no_cache: If True, bypass cache entirely
+        embedding_dimension: Embedding dimension for cache segmentation (prevents
+            cross-dimension cache pollution when dimension settings change)
+    """
     if not labels:
         return np.empty((0, 0), dtype=np.float32)
     if no_cache:
@@ -701,8 +750,9 @@ def _embed_labels_with_cache(
         return np.asarray(vectors, dtype=np.float32)
     from ..cache import embedding_cache_key, load_embedding_cache, store_embedding_cache
 
-    hashes = [embedding_cache_key(label) for label in labels]
-    cached = load_embedding_cache(model_name, hashes)
+    # Include dimension in cache key to prevent cross-dimension cache pollution
+    hashes = [embedding_cache_key(label, dimension=embedding_dimension) for label in labels]
+    cached = load_embedding_cache(model_name, hashes, dimension=embedding_dimension)
     missing: dict[str, str] = {}
     for label, text_hash in zip(labels, hashes):
         vector = cached.get(text_hash)
@@ -719,7 +769,9 @@ def _embed_labels_with_cache(
             vector = np.asarray(new_vectors[idx], dtype=np.float32)
             cached[text_hash] = vector
             stored[text_hash] = vector
-        store_embedding_cache(model=model_name, embeddings=stored)
+        store_embedding_cache(
+            model=model_name, embeddings=stored, dimension=embedding_dimension
+        )
 
     vectors = [cached[text_hash] for text_hash in hashes]
     return np.vstack([np.asarray(vector, dtype=np.float32) for vector in vectors])

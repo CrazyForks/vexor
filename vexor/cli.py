@@ -31,14 +31,18 @@ from .config import (
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
     DEFAULT_RERANK,
+    DEFAULT_VOYAGE_MODEL,
+    DIMENSION_SUPPORTED_MODELS,
     SUPPORTED_EXTRACT_BACKENDS,
     SUPPORTED_PROVIDERS,
     SUPPORTED_RERANKERS,
     flashrank_cache_dir,
+    get_supported_dimensions,
     load_config,
     normalize_remote_rerank_url,
     resolve_remote_rerank_api_key,
     resolve_default_model,
+    supports_dimensions,
 )
 from .modes import available_modes, get_strategy
 from .services.cache_service import is_cache_current, load_index_metadata_safe
@@ -454,6 +458,7 @@ def search(
         rerank=rerank,
         flashrank_model=flashrank_model,
         remote_rerank=remote_rerank,
+        embedding_dimensions=config.embedding_dimensions,
     )
     if output_format == SearchOutputFormat.rich:
         if no_cache:
@@ -488,7 +493,7 @@ def search(
         else:
             typer.echo(message, err=True)
         raise typer.Exit(code=1)
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         if output_format == SearchOutputFormat.rich:
             console.print(_styled(str(exc), Styles.ERROR))
         else:
@@ -688,8 +693,9 @@ def index(
             local_cuda=bool(config.local_cuda),
             exclude_patterns=normalized_excludes,
             extensions=normalized_exts,
+            embedding_dimensions=config.embedding_dimensions,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         console.print(_styled(str(exc), Styles.ERROR))
         raise typer.Exit(code=1)
     if result.status == IndexStatus.EMPTY:
@@ -767,6 +773,16 @@ def config(
         False,
         "--clear-base-url",
         help=Messages.HELP_CLEAR_BASE_URL,
+    ),
+    set_embedding_dimensions_option: int | None = typer.Option(
+        None,
+        "--set-embedding-dimensions",
+        help=Messages.HELP_SET_EMBEDDING_DIMENSIONS,
+    ),
+    clear_embedding_dimensions: bool = typer.Option(
+        False,
+        "--clear-embedding-dimensions",
+        help=Messages.HELP_CLEAR_EMBEDDING_DIMENSIONS,
     ),
     set_auto_index_option: str | None = typer.Option(
         None,
@@ -989,6 +1005,27 @@ def config(
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
 
+    # Validate embedding dimensions if set
+    if set_embedding_dimensions_option is not None:
+        if set_embedding_dimensions_option < 0:
+            raise typer.BadParameter(
+                f"--set-embedding-dimensions must be non-negative, got {set_embedding_dimensions_option}"
+            )
+        if set_embedding_dimensions_option > 0:
+            # Resolve effective model from provider + model to account for provider defaults
+            effective_model = resolve_default_model(pending_provider, pending_model)
+            if not supports_dimensions(effective_model):
+                raise typer.BadParameter(
+                    f"Model '{effective_model}' does not support custom dimensions. "
+                    f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+                )
+            supported = get_supported_dimensions(effective_model)
+            if supported and set_embedding_dimensions_option not in supported:
+                raise typer.BadParameter(
+                    f"Dimension {set_embedding_dimensions_option} is not supported for model '{effective_model}'. "
+                    f"Supported dimensions: {supported}"
+                )
+
     updates = apply_config_updates(
         api_key=set_api_key_option,
         clear_api_key=clear_api_key,
@@ -1007,6 +1044,8 @@ def config(
         remote_rerank_model=set_remote_rerank_model_option,
         remote_rerank_api_key=set_remote_rerank_api_key_option,
         clear_remote_rerank=clear_remote_rerank,
+        embedding_dimensions=set_embedding_dimensions_option,
+        clear_embedding_dimensions=clear_embedding_dimensions,
     )
 
     if updates.api_key_set:
@@ -1109,6 +1148,17 @@ def config(
         console.print(_styled(Messages.INFO_REMOTE_RERANK_API_KEY_SET, Styles.SUCCESS))
     if updates.remote_rerank_cleared and clear_remote_rerank:
         console.print(_styled(Messages.INFO_REMOTE_RERANK_CLEARED, Styles.SUCCESS))
+    if updates.embedding_dimensions_set and set_embedding_dimensions_option is not None:
+        console.print(
+            _styled(
+                Messages.INFO_EMBEDDING_DIMENSIONS_SET.format(
+                    value=set_embedding_dimensions_option
+                ),
+                Styles.SUCCESS,
+            )
+        )
+    if updates.embedding_dimensions_cleared and clear_embedding_dimensions:
+        console.print(_styled(Messages.INFO_EMBEDDING_DIMENSIONS_CLEARED, Styles.SUCCESS))
 
     if clear_flashrank:
         cache_dir = flashrank_cache_dir(create=False)
@@ -1188,6 +1238,7 @@ def config(
                     api="yes" if cfg.api_key else "no",
                     provider=provider,
                     model=resolve_default_model(provider, cfg.model),
+                    embedding_dimensions=cfg.embedding_dimensions if cfg.embedding_dimensions else "default",
                     batch=cfg.batch_size if cfg.batch_size is not None else DEFAULT_BATCH_SIZE,
                     concurrency=cfg.embed_concurrency,
                     extract_concurrency=cfg.extract_concurrency,

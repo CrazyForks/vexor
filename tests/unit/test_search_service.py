@@ -990,3 +990,57 @@ def test_resolve_rerank_candidates() -> None:
     assert search_service_module._resolve_rerank_candidates(75) == 150
     assert search_service_module._resolve_rerank_candidates(100) == 150
     assert search_service_module._resolve_rerank_candidates(200) == 150
+
+
+def test_perform_search_raises_on_dimension_mismatch(monkeypatch, tmp_path: Path) -> None:
+    """Test that dimension mismatch between query and index raises a clear error."""
+    import importlib
+
+    # Create fake index with 2-dim vectors
+    def fake_load_index_vectors(*_args, **_kwargs):
+        paths = [tmp_path / "a.txt"]
+        vectors = np.array([[1.0, 0.0]], dtype=np.float32)  # 2-dim
+        metadata = {"version": 1, "dimension": 2}
+        return paths, vectors, metadata
+
+    # Create searcher that returns 3-dim vectors (mismatched!)
+    class MismatchedSearcher:
+        device = "dummy-backend"
+
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def embed_texts(self, texts):
+            # Return 3-dim vectors - intentional mismatch with 2-dim index
+            return np.array([[1.0, 0.0, 0.5]], dtype=np.float32)
+
+    monkeypatch.setattr("vexor.cache.load_index_vectors", fake_load_index_vectors)
+    monkeypatch.setattr("vexor.services.search_service.is_cache_current", lambda *_a, **_k: True)
+
+    search_module = importlib.import_module("vexor.search")
+    monkeypatch.setattr(search_module, "VexorSearcher", MismatchedSearcher)
+
+    (tmp_path / "a.txt").write_text("content")
+
+    request = SearchRequest(
+        query="test",
+        directory=tmp_path,
+        include_hidden=False,
+        respect_gitignore=True,
+        mode="name",
+        recursive=True,
+        top_k=1,
+        model_name="model",
+        batch_size=0,
+        provider="gemini",
+        base_url=None,
+        api_key="k",
+        local_cuda=False,
+        exclude_patterns=(),
+        extensions=(),
+        auto_index=False,
+        rerank="off",
+    )
+
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        perform_search(request)
