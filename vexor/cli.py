@@ -1005,24 +1005,30 @@ def config(
         except ValueError as exc:
             raise typer.BadParameter(str(exc)) from exc
 
+    effective_embedding_dimensions = set_embedding_dimensions_option
+    effective_clear_embedding_dimensions = clear_embedding_dimensions
+    if effective_embedding_dimensions == 0:
+        effective_embedding_dimensions = None
+        effective_clear_embedding_dimensions = True
+
     # Validate embedding dimensions if set
-    if set_embedding_dimensions_option is not None:
-        if set_embedding_dimensions_option < 0:
+    if effective_embedding_dimensions is not None:
+        if effective_embedding_dimensions < 0:
             raise typer.BadParameter(
-                f"--set-embedding-dimensions must be non-negative, got {set_embedding_dimensions_option}"
+                f"--set-embedding-dimensions must be non-negative, got {effective_embedding_dimensions}"
             )
-        if set_embedding_dimensions_option > 0:
+        if effective_embedding_dimensions > 0:
             # Resolve effective model from provider + model to account for provider defaults
             effective_model = resolve_default_model(pending_provider, pending_model)
             if not supports_dimensions(effective_model):
                 raise typer.BadParameter(
                     f"Model '{effective_model}' does not support custom dimensions. "
-                    f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+                    f"Supported model names/prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
                 )
             supported = get_supported_dimensions(effective_model)
-            if supported and set_embedding_dimensions_option not in supported:
+            if supported and effective_embedding_dimensions not in supported:
                 raise typer.BadParameter(
-                    f"Dimension {set_embedding_dimensions_option} is not supported for model '{effective_model}'. "
+                    f"Dimension {effective_embedding_dimensions} is not supported for model '{effective_model}'. "
                     f"Supported dimensions: {supported}"
                 )
 
@@ -1044,8 +1050,8 @@ def config(
         remote_rerank_model=set_remote_rerank_model_option,
         remote_rerank_api_key=set_remote_rerank_api_key_option,
         clear_remote_rerank=clear_remote_rerank,
-        embedding_dimensions=set_embedding_dimensions_option,
-        clear_embedding_dimensions=clear_embedding_dimensions,
+        embedding_dimensions=effective_embedding_dimensions,
+        clear_embedding_dimensions=effective_clear_embedding_dimensions,
     )
 
     if updates.api_key_set:
@@ -1148,16 +1154,16 @@ def config(
         console.print(_styled(Messages.INFO_REMOTE_RERANK_API_KEY_SET, Styles.SUCCESS))
     if updates.remote_rerank_cleared and clear_remote_rerank:
         console.print(_styled(Messages.INFO_REMOTE_RERANK_CLEARED, Styles.SUCCESS))
-    if updates.embedding_dimensions_set and set_embedding_dimensions_option is not None:
+    if updates.embedding_dimensions_set and effective_embedding_dimensions is not None:
         console.print(
             _styled(
                 Messages.INFO_EMBEDDING_DIMENSIONS_SET.format(
-                    value=set_embedding_dimensions_option
+                    value=effective_embedding_dimensions
                 ),
                 Styles.SUCCESS,
             )
         )
-    if updates.embedding_dimensions_cleared and clear_embedding_dimensions:
+    if updates.embedding_dimensions_cleared:
         console.print(_styled(Messages.INFO_EMBEDDING_DIMENSIONS_CLEARED, Styles.SUCCESS))
 
     if clear_flashrank:

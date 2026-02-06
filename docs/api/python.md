@@ -68,6 +68,7 @@ Config-related parameters:
 
 - `provider`, `model`, `batch_size`, `embed_concurrency`, `extract_concurrency`, `extract_backend`
 - `base_url`, `api_key`, `local_cuda`
+- `embedding_dimensions`
 - `auto_index`, `use_config`
 - `config`: dict or JSON string (per-call override)
 
@@ -121,14 +122,15 @@ merging with the current runtime or on-disk config (avoids reading disk).
 
 The `config` payload (dict/JSON) supports:
 
-- `provider`: `openai`, `gemini`, `custom`, `local`
+- `provider`: `openai`, `gemini`, `voyageai`, `custom`, `local`
 - `model`: embedding model name
 - `api_key`: API key (string or null)
-- `base_url`: API base URL for `openai`/`custom` providers
+- `base_url`: API base URL for `openai`/`voyageai`/`custom` providers
 - `batch_size`: integer
 - `embed_concurrency`: integer
 - `extract_concurrency`: integer
 - `extract_backend`: `auto`, `thread`, or `process`
+- `embedding_dimensions`: integer or null
 - `auto_index`: boolean
 - `local_cuda`: boolean (local provider only)
 - `rerank`: `off`, `bm25`, `flashrank`, `remote`
@@ -138,7 +140,7 @@ The `config` payload (dict/JSON) supports:
 Unknown keys are ignored. `remote_rerank.base_url` is normalized to end with `/rerank`.
 
 API keys can also come from environment variables:
-`VEXOR_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENAI_API_KEY`,
+`VEXOR_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENAI_API_KEY`, `VOYAGE_API_KEY`,
 and `VEXOR_REMOTE_RERANK_API_KEY`.
 
 Environment variables only supply API keys; other settings must be passed

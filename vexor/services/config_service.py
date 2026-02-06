@@ -108,7 +108,12 @@ def apply_config_updates(
         set_api_key(None)
         result.api_key_cleared = True
     if model is not None:
-        set_model(model)
+        set_model(
+            model,
+            validate_embedding_dimensions=not (
+                embedding_dimensions is not None or clear_embedding_dimensions
+            ),
+        )
         result.model_set = True
     if batch_size is not None:
         set_batch_size(batch_size)
@@ -123,7 +128,12 @@ def apply_config_updates(
         set_extract_backend(extract_backend)
         result.extract_backend_set = True
     if provider is not None:
-        set_provider(provider)
+        set_provider(
+            provider,
+            validate_embedding_dimensions=not (
+                embedding_dimensions is not None or clear_embedding_dimensions
+            ),
+        )
         result.provider_set = True
     if base_url is not None:
         set_base_url(base_url)
@@ -160,10 +170,15 @@ def apply_config_updates(
         result.remote_rerank_api_key_set = remote_rerank_api_key is not None
         result.remote_rerank_cleared = clear_remote_rerank
     if embedding_dimensions is not None:
-        set_embedding_dimensions(embedding_dimensions)
-        result.embedding_dimensions_set = True
+        if embedding_dimensions > 0:
+            set_embedding_dimensions(embedding_dimensions)
+            result.embedding_dimensions_set = True
+        else:
+            set_embedding_dimensions(None)
+            result.embedding_dimensions_cleared = True
     if clear_embedding_dimensions:
-        set_embedding_dimensions(None)
+        if not result.embedding_dimensions_cleared:
+            set_embedding_dimensions(None)
         result.embedding_dimensions_cleared = True
     return result
 

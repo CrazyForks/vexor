@@ -1,4 +1,5 @@
 import json
+import pytest
 
 from vexor import config as config_module
 
@@ -273,8 +274,10 @@ def test_get_supported_dimensions_voyage():
 
 def test_get_supported_dimensions_openai():
     """Test that OpenAI models return correct dimension options."""
-    dims = config_module.get_supported_dimensions("text-embedding-3-small")
-    assert dims == (256, 512, 1024, 1536, 3072)
+    small_dims = config_module.get_supported_dimensions("text-embedding-3-small")
+    large_dims = config_module.get_supported_dimensions("text-embedding-3-large")
+    assert small_dims == (256, 512, 1024, 1536)
+    assert large_dims == (256, 512, 1024, 1536, 3072)
 
 
 def test_get_supported_dimensions_unsupported():
@@ -319,7 +322,6 @@ def test_set_embedding_dimensions_clears_with_none(tmp_path, monkeypatch):
 def test_set_embedding_dimensions_negative_raises(tmp_path, monkeypatch):
     """Test that negative dimensions raise ValueError."""
     _prepare_config(tmp_path, monkeypatch)
-    import pytest
 
     with pytest.raises(ValueError, match="non-negative"):
         config_module.set_embedding_dimensions(-1)
@@ -329,7 +331,6 @@ def test_set_embedding_dimensions_unsupported_model_raises(tmp_path, monkeypatch
     """Test that setting dimensions for unsupported model raises ValueError."""
     _prepare_config(tmp_path, monkeypatch)
     config_module.save_config(config_module.Config(model="text-embedding-ada-002"))
-    import pytest
 
     with pytest.raises(ValueError, match="does not support"):
         config_module.set_embedding_dimensions(512)
@@ -339,7 +340,6 @@ def test_set_embedding_dimensions_invalid_dimension_raises(tmp_path, monkeypatch
     """Test that invalid dimension for model raises ValueError."""
     _prepare_config(tmp_path, monkeypatch)
     config_module.save_config(config_module.Config(model="voyage-3"))
-    import pytest
 
     with pytest.raises(ValueError, match="not supported"):
         config_module.set_embedding_dimensions(999)  # Not a valid dimension
@@ -355,3 +355,63 @@ def test_set_embedding_dimensions_with_explicit_model(tmp_path, monkeypatch):
 
     cfg = config_module.load_config()
     assert cfg.embedding_dimensions == 512
+
+
+def test_set_embedding_dimensions_openai_small_rejects_3072(tmp_path, monkeypatch):
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(config_module.Config(model="text-embedding-3-small"))
+
+    with pytest.raises(ValueError, match="not supported"):
+        config_module.set_embedding_dimensions(3072)
+
+
+def test_set_model_rejects_incompatible_existing_dimensions(tmp_path, monkeypatch):
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(
+        config_module.Config(
+            provider="openai",
+            model="text-embedding-3-large",
+            embedding_dimensions=3072,
+        )
+    )
+
+    with pytest.raises(ValueError, match="incompatible"):
+        config_module.set_model("text-embedding-3-small")
+
+
+def test_set_provider_rejects_incompatible_existing_dimensions(tmp_path, monkeypatch):
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(
+        config_module.Config(
+            provider="openai",
+            model="text-embedding-3-small",
+            embedding_dimensions=1536,
+        )
+    )
+
+    with pytest.raises(ValueError, match="incompatible"):
+        config_module.set_provider("gemini")
+
+
+def test_apply_config_updates_allows_model_change_when_dimensions_cleared(tmp_path, monkeypatch):
+    from vexor.services.config_service import apply_config_updates
+
+    _prepare_config(tmp_path, monkeypatch)
+    config_module.save_config(
+        config_module.Config(
+            provider="openai",
+            model="text-embedding-3-large",
+            embedding_dimensions=3072,
+        )
+    )
+
+    updates = apply_config_updates(
+        model="text-embedding-3-small",
+        embedding_dimensions=0,
+    )
+
+    cfg = config_module.load_config()
+    assert cfg.model == "text-embedding-3-small"
+    assert cfg.embedding_dimensions is None
+    assert updates.embedding_dimensions_set is False
+    assert updates.embedding_dimensions_cleared is True

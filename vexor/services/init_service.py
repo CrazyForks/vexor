@@ -231,6 +231,11 @@ def _collect_remote_settings() -> dict[str, object]:
     )
     _print_option(
         "C",
+        Messages.INIT_OPTION_PROVIDER_VOYAGEAI,
+        Messages.INIT_OPTION_PROVIDER_VOYAGEAI_DESC,
+    )
+    _print_option(
+        "D",
         Messages.INIT_OPTION_PROVIDER_CUSTOM,
         Messages.INIT_OPTION_PROVIDER_CUSTOM_DESC,
     )
@@ -242,11 +247,14 @@ def _collect_remote_settings() -> dict[str, object]:
             "openai": "openai",
             "b": "gemini",
             "gemini": "gemini",
-            "c": "custom",
+            "c": "voyageai",
+            "voyageai": "voyageai",
+            "voyage": "voyageai",
+            "d": "custom",
             "custom": "custom",
         },
         default="A",
-        allowed="A/B/C",
+        allowed="A/B/C/D",
     )
     console.print()
 
@@ -266,6 +274,8 @@ def _collect_remote_settings() -> dict[str, object]:
 
     if provider == "gemini":
         api_key = _prompt_api_key(Messages.INIT_PROMPT_API_KEY_GEMINI, provider)
+    elif provider == "voyageai":
+        api_key = _prompt_api_key(Messages.INIT_PROMPT_API_KEY_VOYAGE, provider)
     else:
         api_key = _prompt_api_key(Messages.INIT_PROMPT_API_KEY_OPENAI, provider)
     updates["api_key"] = api_key

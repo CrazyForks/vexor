@@ -21,6 +21,7 @@ from .config import (
     SUPPORTED_RERANKERS,
     config_from_json,
     config_dir_context,
+    validate_embedding_dimensions_for_model,
     load_config,
     resolve_default_model,
     set_config_dir,
@@ -67,6 +68,7 @@ class RuntimeSettings:
     rerank: str
     flashrank_model: str | None
     remote_rerank: RemoteRerankConfig | None
+    embedding_dimensions: int | None
 
 
 @dataclass(slots=True)
@@ -82,6 +84,7 @@ class InMemoryIndex:
     base_url: str | None
     api_key: str | None
     local_cuda: bool
+    embedding_dimensions: int | None = None
     rerank: str = DEFAULT_RERANK
     flashrank_model: str | None = None
     remote_rerank: RemoteRerankConfig | None = None
@@ -140,6 +143,7 @@ class InMemoryIndex:
             temporary_index=True,
             no_cache=no_cache,
             rerank=effective_rerank,
+            embedding_dimensions=self.embedding_dimensions,
             flashrank_model=(
                 flashrank_model
                 if flashrank_model is not None
@@ -282,6 +286,7 @@ class VexorClient:
         base_url: str | None = None,
         api_key: str | None = None,
         local_cuda: bool | None = None,
+        embedding_dimensions: int | None = None,
         auto_index: bool | None = None,
         use_config: bool | None = None,
         config: Config | Mapping[str, object] | str | None = None,
@@ -316,6 +321,7 @@ class VexorClient:
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             auto_index=auto_index,
             use_config=resolved_use_config,
             config=config,
@@ -346,6 +352,7 @@ class VexorClient:
         base_url: str | None = None,
         api_key: str | None = None,
         local_cuda: bool | None = None,
+        embedding_dimensions: int | None = None,
         use_config: bool | None = None,
         config: Config | Mapping[str, object] | str | None = None,
         data_dir: Path | str | None = None,
@@ -375,6 +382,7 @@ class VexorClient:
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             use_config=resolved_use_config,
             config=config,
             runtime_config=self._runtime_config,
@@ -402,6 +410,7 @@ class VexorClient:
         base_url: str | None = None,
         api_key: str | None = None,
         local_cuda: bool | None = None,
+        embedding_dimensions: int | None = None,
         use_config: bool | None = None,
         config: Config | Mapping[str, object] | str | None = None,
         no_cache: bool = True,
@@ -432,6 +441,7 @@ class VexorClient:
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             use_config=resolved_use_config,
             config=config,
             no_cache=no_cache,
@@ -518,6 +528,7 @@ def search(
     base_url: str | None = None,
     api_key: str | None = None,
     local_cuda: bool | None = None,
+    embedding_dimensions: int | None = None,
     auto_index: bool | None = None,
     use_config: bool = True,
     config: Config | Mapping[str, object] | str | None = None,
@@ -547,6 +558,7 @@ def search(
         base_url=base_url,
         api_key=api_key,
         local_cuda=local_cuda,
+        embedding_dimensions=embedding_dimensions,
         auto_index=auto_index,
         use_config=use_config,
         config=config,
@@ -577,6 +589,7 @@ def index(
     base_url: str | None = None,
     api_key: str | None = None,
     local_cuda: bool | None = None,
+    embedding_dimensions: int | None = None,
     use_config: bool = True,
     config: Config | Mapping[str, object] | str | None = None,
     data_dir: Path | str | None = None,
@@ -601,6 +614,7 @@ def index(
         base_url=base_url,
         api_key=api_key,
         local_cuda=local_cuda,
+        embedding_dimensions=embedding_dimensions,
         use_config=use_config,
         config=config,
         runtime_config=_RUNTIME_CONFIG,
@@ -628,6 +642,7 @@ def index_in_memory(
     base_url: str | None = None,
     api_key: str | None = None,
     local_cuda: bool | None = None,
+    embedding_dimensions: int | None = None,
     use_config: bool = True,
     config: Config | Mapping[str, object] | str | None = None,
     no_cache: bool = True,
@@ -653,6 +668,7 @@ def index_in_memory(
         base_url=base_url,
         api_key=api_key,
         local_cuda=local_cuda,
+        embedding_dimensions=embedding_dimensions,
         use_config=use_config,
         config=config,
         no_cache=no_cache,
@@ -711,6 +727,7 @@ def _search_with_settings(
     base_url: str | None,
     api_key: str | None,
     local_cuda: bool | None,
+    embedding_dimensions: int | None,
     auto_index: bool | None,
     use_config: bool,
     config: Config | Mapping[str, object] | str | None,
@@ -747,6 +764,7 @@ def _search_with_settings(
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             auto_index=auto_index,
             use_config=use_config,
             runtime_config=runtime_config,
@@ -776,6 +794,7 @@ def _search_with_settings(
             temporary_index=temporary_index,
             no_cache=no_cache,
             rerank=settings.rerank,
+            embedding_dimensions=settings.embedding_dimensions,
             flashrank_model=settings.flashrank_model,
             remote_rerank=settings.remote_rerank,
         )
@@ -800,6 +819,7 @@ def _index_with_settings(
     base_url: str | None,
     api_key: str | None,
     local_cuda: bool | None,
+    embedding_dimensions: int | None,
     use_config: bool,
     config: Config | Mapping[str, object] | str | None,
     runtime_config: Config | None,
@@ -825,6 +845,7 @@ def _index_with_settings(
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             auto_index=None,
             use_config=use_config,
             runtime_config=runtime_config,
@@ -846,6 +867,7 @@ def _index_with_settings(
             base_url=settings.base_url,
             api_key=settings.api_key,
             local_cuda=settings.local_cuda,
+            embedding_dimensions=settings.embedding_dimensions,
             exclude_patterns=normalized_excludes,
             extensions=normalized_exts,
         )
@@ -869,6 +891,7 @@ def _index_in_memory_with_settings(
     base_url: str | None,
     api_key: str | None,
     local_cuda: bool | None,
+    embedding_dimensions: int | None,
     use_config: bool,
     config: Config | Mapping[str, object] | str | None,
     no_cache: bool,
@@ -895,6 +918,7 @@ def _index_in_memory_with_settings(
             base_url=base_url,
             api_key=api_key,
             local_cuda=local_cuda,
+            embedding_dimensions=embedding_dimensions,
             auto_index=None,
             use_config=use_config,
             runtime_config=runtime_config,
@@ -916,6 +940,7 @@ def _index_in_memory_with_settings(
             base_url=settings.base_url,
             api_key=settings.api_key,
             local_cuda=settings.local_cuda,
+            embedding_dimensions=settings.embedding_dimensions,
             exclude_patterns=normalized_excludes,
             extensions=normalized_exts,
             no_cache=no_cache,
@@ -933,6 +958,7 @@ def _index_in_memory_with_settings(
             base_url=settings.base_url,
             api_key=settings.api_key,
             local_cuda=settings.local_cuda,
+            embedding_dimensions=settings.embedding_dimensions,
             rerank=settings.rerank,
             flashrank_model=settings.flashrank_model,
             remote_rerank=settings.remote_rerank,
@@ -1011,6 +1037,7 @@ def _resolve_settings(
     base_url: str | None,
     api_key: str | None,
     local_cuda: bool | None,
+    embedding_dimensions: int | None,
     auto_index: bool | None,
     use_config: bool,
     runtime_config: Config | None = None,
@@ -1047,6 +1074,19 @@ def _resolve_settings(
     extract_backend_value = (
         extract_backend if extract_backend is not None else config.extract_backend
     )
+    resolved_embedding_dimensions = _coerce_embedding_dimensions(
+        embedding_dimensions
+        if embedding_dimensions is not None
+        else config.embedding_dimensions
+    )
+    try:
+        validate_embedding_dimensions_for_model(
+            resolved_embedding_dimensions,
+            model_name,
+        )
+    except ValueError as exc:
+        raise VexorError(str(exc)) from exc
+
     return RuntimeSettings(
         provider=provider_value,
         model_name=model_name,
@@ -1061,6 +1101,7 @@ def _resolve_settings(
         rerank=rerank_value,
         flashrank_model=config.flashrank_model,
         remote_rerank=config.remote_rerank,
+        embedding_dimensions=resolved_embedding_dimensions,
     )
 
 
@@ -1074,3 +1115,17 @@ def _apply_config_override(
         return config_from_json(override, base=base)
     except ValueError as exc:
         raise VexorError(str(exc)) from exc
+
+
+def _coerce_embedding_dimensions(value: int | None) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise VexorError(Messages.ERROR_EMBEDDING_DIMENSIONS_INVALID)
+    if not isinstance(value, int):
+        raise VexorError(Messages.ERROR_EMBEDDING_DIMENSIONS_INVALID)
+    if value == 0:
+        return None
+    if value < 0:
+        raise VexorError(Messages.ERROR_EMBEDDING_DIMENSIONS_INVALID)
+    return value

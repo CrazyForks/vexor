@@ -117,12 +117,15 @@ Skill source: [`plugins/vexor/skills/vexor-cli`](https://github.com/scarletkc/ve
 ## Configuration
 
 ```bash
-vexor config --set-provider openai          # default; also supports gemini/custom/local
+vexor config --set-provider openai          # default; also supports gemini/voyageai/custom/local
 vexor config --set-model text-embedding-3-small
+vexor config --set-provider voyageai        # uses voyage defaults when model/base_url are unset
 vexor config --set-batch-size 0             # 0 = single request
 vexor config --set-embed-concurrency 4       # parallel embedding requests
 vexor config --set-extract-concurrency 4     # parallel file extraction workers
 vexor config --set-extract-backend auto      # auto|thread|process (default: auto)
+vexor config --set-embedding-dimensions 1024 # optional, model/provider dependent
+vexor config --clear-embedding-dimensions    # reset to model default dimension
 vexor config --set-auto-index true          # auto-index before search (default)
 vexor config --rerank bm25                  # optional BM25 rerank for top-k results
 vexor config --rerank flashrank             # FlashRank rerank (requires optional extra)
@@ -148,7 +151,7 @@ Config stored in `~/.vexor/config.json`.
 ```bash
 vexor config --set-api-key "YOUR_KEY"
 ```
-Or via environment: `VEXOR_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_GENAI_API_KEY`.
+Or via environment: `VEXOR_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_GENAI_API_KEY`, or `VOYAGE_API_KEY`.
 
 ### Rerank
 
@@ -168,10 +171,29 @@ Recommended defaults:
 
 ### Providers: Remote vs Local
 
-Vexor supports both remote API providers (`openai`, `gemini`, `custom`) and a local provider (`local`):
+Vexor supports both remote API providers (`openai`, `gemini`, `voyageai`, `custom`) and a local provider (`local`):
 - Remote providers use `api_key` and optional `base_url`.
+- `voyageai` defaults to `https://api.voyageai.com/v1` when `base_url` is not set.
 - `custom` is OpenAI-compatible and requires both `model` and `base_url`.
 - Local provider ignores `api_key/base_url` and only uses `model` plus `local_cuda` (CPU/GPU switch).
+
+### Embedding Dimensions
+
+Embedding dimensions are optional. If unset, the provider/model default is used.
+Custom dimensions are validated for:
+- OpenAI `text-embedding-3-*`
+- Voyage `voyage-3*` and `voyage-code-3*`
+
+```bash
+vexor config --set-embedding-dimensions 1024
+vexor config --clear-embedding-dimensions
+```
+
+If you change dimensions after an index is built, rebuild the index:
+
+```bash
+vexor index --path .
+```
 
 ### Local Model (Offline)
 

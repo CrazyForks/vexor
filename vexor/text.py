@@ -61,7 +61,9 @@ class Messages:
     HELP_SET_EMBED_CONCURRENCY = "Set the number of concurrent embedding requests."
     HELP_SET_EXTRACT_CONCURRENCY = "Set the number of concurrent file extraction workers."
     HELP_SET_EXTRACT_BACKEND = "Set the extraction backend (auto, thread, process)."
-    HELP_SET_PROVIDER = "Set the default embedding provider (e.g., gemini, openai, custom, or local)."
+    HELP_SET_PROVIDER = (
+        "Set the default embedding provider (e.g., openai, gemini, voyageai, custom, or local)."
+    )
     HELP_SET_BASE_URL = "Override the provider's base URL (leave unset for official endpoints)."
     HELP_CLEAR_BASE_URL = "Remove the custom base URL override."
     HELP_SET_AUTO_INDEX = "Enable/disable automatic indexing before search (default: enabled)."
@@ -181,13 +183,16 @@ class Messages:
     INIT_OPTION_PROVIDER_OPENAI_DESC = "default"
     INIT_OPTION_PROVIDER_GEMINI = "Gemini"
     INIT_OPTION_PROVIDER_GEMINI_DESC = "Google AI"
+    INIT_OPTION_PROVIDER_VOYAGEAI = "Voyage AI"
+    INIT_OPTION_PROVIDER_VOYAGEAI_DESC = "embedding API"
     INIT_OPTION_PROVIDER_CUSTOM = "Custom"
     INIT_OPTION_PROVIDER_CUSTOM_DESC = "OpenAI-compatible"
-    INIT_PROMPT_PROVIDER = "Choose A/B/C"
+    INIT_PROMPT_PROVIDER = "Choose A/B/C/D"
     INIT_PROMPT_CUSTOM_BASE_URL = "Custom base URL"
     INIT_PROMPT_CUSTOM_MODEL = "Custom model name"
     INIT_PROMPT_API_KEY_OPENAI = "OpenAI API key (leave blank to use environment variables)"
     INIT_PROMPT_API_KEY_GEMINI = "Gemini API key (leave blank to use environment variables)"
+    INIT_PROMPT_API_KEY_VOYAGE = "Voyage API key (leave blank to use environment variables)"
     INIT_PROMPT_API_KEY_CUSTOM = "API key (leave blank to use environment variables)"
     INIT_CONFIRM_SKIP_API_KEY = "No API key found. Continue without it?"
     INIT_USING_ENV_API_KEY = "Using API key from environment."
@@ -359,7 +364,7 @@ class Messages:
     DOCTOR_API_KEY_MISSING = "API key not configured"
     DOCTOR_API_KEY_MISSING_DETAIL = (
         "Run `vexor config --set-api-key <KEY>` or set VEXOR_API_KEY / "
-        "OPENAI_API_KEY / GOOGLE_GENAI_API_KEY environment variable."
+        "OPENAI_API_KEY / GOOGLE_GENAI_API_KEY / VOYAGE_API_KEY environment variable."
     )
     DOCTOR_API_KEY_NOT_REQUIRED = "Local provider selected (no API key required)"
     DOCTOR_API_SKIPPED = "Skipped (no API key)"

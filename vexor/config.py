@@ -37,11 +37,12 @@ VOYAGE_BASE_URL = "https://api.voyageai.com/v1"
 SUPPORTED_PROVIDERS: tuple[str, ...] = (DEFAULT_PROVIDER, "gemini", "voyageai", "custom", "local")
 SUPPORTED_RERANKERS: tuple[str, ...] = ("off", "bm25", "flashrank", "remote")
 SUPPORTED_EXTRACT_BACKENDS: tuple[str, ...] = ("auto", "thread", "process")
-# Models that support the dimensions parameter (model prefix -> supported dimensions)
+# Models that support the dimensions parameter (model prefix/name -> supported dimensions)
 DIMENSION_SUPPORTED_MODELS: dict[str, tuple[int, ...]] = {
+    "text-embedding-3-small": (256, 512, 1024, 1536),
+    "text-embedding-3-large": (256, 512, 1024, 1536, 3072),
     "voyage-3": (256, 512, 1024, 2048),
     "voyage-code-3": (256, 512, 1024, 2048),
-    "text-embedding-3": (256, 512, 1024, 1536, 3072),
 }
 ENV_API_KEY = "VEXOR_API_KEY"
 REMOTE_RERANK_ENV = "VEXOR_REMOTE_RERANK_API_KEY"
@@ -236,9 +237,11 @@ def set_api_key(value: str | None) -> None:
     save_config(config)
 
 
-def set_model(value: str) -> None:
+def set_model(value: str, *, validate_embedding_dimensions: bool = True) -> None:
     config = load_config()
     config.model = value
+    if validate_embedding_dimensions:
+        _validate_config_embedding_dimensions(config)
     save_config(config)
 
 
@@ -266,9 +269,11 @@ def set_extract_backend(value: str) -> None:
     save_config(config)
 
 
-def set_provider(value: str) -> None:
+def set_provider(value: str, *, validate_embedding_dimensions: bool = True) -> None:
     config = load_config()
     config.provider = value
+    if validate_embedding_dimensions:
+        _validate_config_embedding_dimensions(config)
     save_config(config)
 
 
@@ -337,18 +342,7 @@ def set_embedding_dimensions(
     # Validate against effective model (resolved from provider + model)
     effective_provider = provider if provider else config.provider
     effective_model = resolve_default_model(effective_provider, model if model else config.model)
-    if not supports_dimensions(effective_model):
-        raise ValueError(
-            f"Model '{effective_model}' does not support custom dimensions. "
-            f"Supported model prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
-        )
-
-    supported = get_supported_dimensions(effective_model)
-    if supported and value not in supported:
-        raise ValueError(
-            f"Dimension {value} is not supported for model '{effective_model}'. "
-            f"Supported dimensions: {supported}"
-        )
+    validate_embedding_dimensions_for_model(value, effective_model)
 
     config.embedding_dimensions = value
     save_config(config)
@@ -425,8 +419,7 @@ def resolve_base_url(provider: str | None, configured_url: str | None) -> str | 
 
 def supports_dimensions(model: str) -> bool:
     """Check if a model supports the dimensions parameter."""
-    model_lower = model.lower()
-    return any(model_lower.startswith(prefix) for prefix in DIMENSION_SUPPORTED_MODELS)
+    return get_supported_dimensions(model) is not None
 
 
 def get_supported_dimensions(model: str) -> tuple[int, ...] | None:
@@ -436,6 +429,41 @@ def get_supported_dimensions(model: str) -> tuple[int, ...] | None:
         if model_lower.startswith(prefix):
             return dims
     return None
+
+
+def validate_embedding_dimensions_for_model(value: int | None, model: str) -> None:
+    """Validate that `value` is supported by `model` when value is set."""
+    if value is None:
+        return
+    supported = get_supported_dimensions(model)
+    if not supported:
+        raise ValueError(
+            f"Model '{model}' does not support custom dimensions. "
+            f"Supported model names/prefixes: {', '.join(DIMENSION_SUPPORTED_MODELS.keys())}"
+        )
+    if value not in supported:
+        raise ValueError(
+            f"Dimension {value} is not supported for model '{model}'. "
+            f"Supported dimensions: {supported}"
+        )
+
+
+def _validate_config_embedding_dimensions(config: Config) -> None:
+    """Ensure stored embedding dimensions remain compatible with provider/model."""
+    if config.embedding_dimensions is None:
+        return
+    effective_model = resolve_default_model(config.provider, config.model)
+    try:
+        validate_embedding_dimensions_for_model(
+            config.embedding_dimensions,
+            effective_model,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"Current embedding_dimensions ({config.embedding_dimensions}) is incompatible with "
+            f"model '{effective_model}'. Clear it with "
+            "`vexor config --clear-embedding-dimensions` or set a supported value."
+        ) from exc
 
 
 def resolve_api_key(configured: str | None, provider: str) -> str | None:

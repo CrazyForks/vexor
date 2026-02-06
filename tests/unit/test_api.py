@@ -105,6 +105,7 @@ def test_search_overrides_config(tmp_path, monkeypatch) -> None:
         base_url="https://override.test",
         api_key="override-key",
         local_cuda=True,
+        embedding_dimensions=512,
         auto_index=False,
     )
 
@@ -119,6 +120,7 @@ def test_search_overrides_config(tmp_path, monkeypatch) -> None:
     assert req.api_key == "override-key"
     assert req.auto_index is False
     assert req.local_cuda is True
+    assert req.embedding_dimensions == 512
 
 
 def test_set_data_dir_updates_config_and_cache(tmp_path) -> None:
@@ -232,6 +234,39 @@ def test_search_accepts_config_override(tmp_path, monkeypatch) -> None:
     assert req.remote_rerank.base_url == "https://api.example.test/v1/rerank"
 
 
+def test_search_accepts_config_override_with_embedding_dimensions(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_perform_search(request):
+        captured["request"] = request
+        return SearchResponse(
+            base_path=tmp_path,
+            backend=None,
+            results=[],
+            is_stale=False,
+            index_empty=True,
+        )
+
+    monkeypatch.setattr(api_module, "perform_search", fake_perform_search)
+
+    api_module.search(
+        "hello",
+        path=tmp_path,
+        mode="name",
+        config={
+            "provider": "openai",
+            "model": "text-embedding-3-small",
+            "api_key": "key",
+            "embedding_dimensions": 1024,
+        },
+    )
+
+    req = captured["request"]
+    assert req.provider == "openai"
+    assert req.model_name == "text-embedding-3-small"
+    assert req.embedding_dimensions == 1024
+
+
 def test_search_rejects_invalid_config_override(tmp_path) -> None:
     with pytest.raises(api_module.VexorError):
         api_module.search("hello", path=tmp_path, config='["nope"]')
@@ -269,6 +304,28 @@ def test_index_normalizes_extensions_and_excludes(tmp_path, monkeypatch) -> None
     assert captured["directory"] == tmp_path.resolve()
     assert kwargs["extensions"] == (".md", ".py")
     assert kwargs["exclude_patterns"] == ("tests/**",)
+
+
+def test_index_passes_embedding_dimensions_to_builder(tmp_path, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_build_index(directory, **kwargs):
+        captured["directory"] = directory
+        captured["kwargs"] = kwargs
+        return IndexResult(status=IndexStatus.EMPTY)
+
+    monkeypatch.setattr(api_module, "build_index", fake_build_index)
+
+    api_module.index(
+        tmp_path,
+        mode="name",
+        use_config=False,
+        embedding_dimensions=1024,
+    )
+
+    kwargs = captured["kwargs"]
+    assert captured["directory"] == tmp_path.resolve()
+    assert kwargs["embedding_dimensions"] == 1024
 
 
 def test_search_uses_data_dir_override(tmp_path, monkeypatch) -> None:
@@ -350,13 +407,20 @@ def test_index_in_memory_builds_index(tmp_path, monkeypatch) -> None:
 
     monkeypatch.setattr(api_module, "build_index_in_memory", fake_build_index_in_memory)
 
-    result = api_module.index_in_memory(tmp_path, mode="name", use_config=False)
+    result = api_module.index_in_memory(
+        tmp_path,
+        mode="name",
+        use_config=False,
+        embedding_dimensions=512,
+    )
 
     assert isinstance(result, api_module.InMemoryIndex)
     assert result.base_path == tmp_path.resolve()
     assert result.paths[0].name == "file.py"
     assert captured["directory"] == tmp_path.resolve()
     assert captured["kwargs"]["no_cache"] is True
+    assert captured["kwargs"]["embedding_dimensions"] == 512
+    assert result.embedding_dimensions == 512
 
 
 def test_in_memory_index_search_uses_search_from_vectors(tmp_path, monkeypatch) -> None:
@@ -386,6 +450,7 @@ def test_in_memory_index_search_uses_search_from_vectors(tmp_path, monkeypatch) 
         base_url=None,
         api_key=None,
         local_cuda=False,
+        embedding_dimensions=1536,
     )
 
     index.search("hello", top=3)
@@ -394,6 +459,42 @@ def test_in_memory_index_search_uses_search_from_vectors(tmp_path, monkeypatch) 
     assert req.top_k == 3
     assert req.mode == "name"
     assert req.no_cache is True
+    assert req.embedding_dimensions == 1536
+
+
+def test_search_rejects_invalid_embedding_dimensions(tmp_path) -> None:
+    with pytest.raises(api_module.VexorError):
+        api_module.search(
+            "hello",
+            path=tmp_path,
+            mode="name",
+            use_config=False,
+            embedding_dimensions=-1,
+        )
+
+
+def test_search_rejects_unsupported_model_for_custom_dimensions(tmp_path) -> None:
+    with pytest.raises(api_module.VexorError, match="does not support"):
+        api_module.search(
+            "hello",
+            path=tmp_path,
+            mode="name",
+            use_config=False,
+            model="text-embedding-ada-002",
+            embedding_dimensions=512,
+        )
+
+
+def test_search_rejects_unsupported_dimension_for_model(tmp_path) -> None:
+    with pytest.raises(api_module.VexorError, match="not supported"):
+        api_module.search(
+            "hello",
+            path=tmp_path,
+            mode="name",
+            use_config=False,
+            model="text-embedding-3-small",
+            embedding_dimensions=3072,
+        )
 
 
 def test_config_context_yields_configured_client(tmp_path, monkeypatch) -> None:
